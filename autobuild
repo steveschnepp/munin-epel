@@ -1,0 +1,92 @@
+#! /bin/sh
+# Autobuilding script : GIT -> RPM packages
+# (c) GPL - Steve Schnepp <steve.schnepp@pwkf.org>
+
+# Stopping on error
+set -e
+
+# We don't want localized mesgs
+LANG=C
+
+# Always gets the last building tools
+( cd redhat && git pull )
+
+[ -d trunk ] || exit 2;
+
+OLDREVISION=$(cd trunk && git rev-parse HEAD)
+[ -z "$NO_UPDATE" ] && (
+        cd trunk && git fetch origin && git merge origin/devel
+        # remove debian-like tags
+        git tag | perl -lne 'print if /-(\d+)$/' | xargs -n1 git tag -d
+)
+
+REVISION=$(cd trunk && git rev-parse HEAD)
+
+UPSTREAM=$(cd trunk && ./getversion | tr '-' '_')
+VERSION="${UPSTREAM}-999"
+
+
+if [ -z "$NO_UPDATE" -a "$OLDREVISION" = "$REVISION" ]
+then
+	echo "Nothing to do, ${UPSTREAM} ($REVISION) is the oldest"	
+	exit 1
+fi
+
+# Creating the tgz. first extract to source dir
+(cd trunk && git archive --format=tar epel-auto --prefix=munin-${UPSTREAM}/ ) | tar x
+
+# patch RELEASE there
+(cd munin-${UPSTREAM} && echo ${UPSTREAM} > RELEASE)
+
+# recompress to tgz into rpmsources
+tar zcvf rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz munin-$UPSTREAM
+rm -Rf munin-$UPSTREAM
+
+# Copy the patchs to rpmsources
+for i in $(awk '/^Patch[0-9]+:/ { print $2 }' redhat/munin.spec)
+do
+	cp -v redhat/$i rpmbuild/SOURCES/
+done
+cp -v redhat/* rpmbuild/SOURCES/
+
+TMPFILE=$(mktemp)
+(
+	cd trunk
+
+	NOW=$(date +"%a %b %d %Y")
+	printf "* $NOW  - $UPSTREAM\n"
+	printf "  - Somewhat daily build from devel\n"
+	printf "  - Authors:\n";
+	[ -z "$NO_UPDATE" ] && git shortlog $OLDREVISION..$REVISION | perl -lne 'if (/^(\w[^(]+)/) { $a = $1; $a =~ s/ +$//; print "    $a" }'
+	printf "  - Commit log:\n";
+	[ -z "$NO_UPDATE" ] && git log --graph --no-merges --oneline $OLDREVISION..$REVISION | perl -lne 'print "    $_"'
+	printf "\n"
+) >> $TMPFILE
+
+# ... and insert it in the beggining of the changex log
+touch redhat/munin.spec.changelog
+cat redhat/munin.spec.changelog >> $TMPFILE
+mv $TMPFILE redhat/munin.spec.changelog
+rm -f $TMPFILE
+
+# Update the new version ...
+TMP_SPEC_FILE=$(mktemp)
+( 
+	cat redhat/munin.spec |\
+		sed -e "s/^Version: .*/Version: $UPSTREAM/" |\
+		perl -lnpe 'last if /^%changelog/'
+	echo "%changelog"
+	cat $TMPFILE
+	cat redhat/munin.spec |\
+		perl -lne 'print if $in_cl; $in_cl = 1 if (/^%changelog/);'	
+) > $TMP_SPEC_FILE
+
+# Building....
+mkdir -p logs
+( 
+	echo $(date) " - START - Building package $UPSTREAM"
+	cd redhat && rpmbuild -v -ba $TMP_SPEC_FILE "$@"
+	echo $(date) " - STOP - Building package $UPSTREAM - retcode : $!"
+) >> logs/rpm-buildpackage-$UPSTREAM.log 
+
+rm $TMP_SPEC_FILE
