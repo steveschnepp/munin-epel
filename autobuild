@@ -39,8 +39,9 @@ fi
 (cd munin-${UPSTREAM} && echo ${UPSTREAM} > RELEASE)
 
 # recompress to tgz into rpmsources
-tar zcvf rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz munin-$UPSTREAM
+tar zcf rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz munin-$UPSTREAM
 rm -Rf munin-$UPSTREAM
+sha256sum rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz > rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz.sha256sum
 
 # Copy the patchs to rpmsources
 for i in $(awk '/^Patch[0-9]+:/ { print $2 }' redhat/munin.spec)
