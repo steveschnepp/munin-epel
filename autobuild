@@ -38,6 +38,9 @@ fi
 # patch RELEASE there
 (cd munin-${UPSTREAM} && echo ${UPSTREAM} > RELEASE)
 
+# Create SOURCES & BUILD in rpmbuild
+mkdir -p rpmbuild/SOURCES rpmbuild/BUILD
+
 # recompress to tgz into rpmsources
 tar zcf rpmbuild/SOURCES/munin-$UPSTREAM.tar.gz munin-$UPSTREAM
 rm -Rf munin-$UPSTREAM
@@ -50,7 +53,10 @@ do
 done
 cp -v redhat/* rpmbuild/SOURCES/
 
-TMPFILE=$(mktemp)
+TMPDIR=$(mktemp -d /tmp/munin.autobuild.XXXXXX)
+trap 'rm -Rf $TMPDIR' EXIT
+
+TMPFILE=$TMPDIR/munin.spec.changelog
 (
 	cd trunk
 
@@ -71,7 +77,7 @@ mv $TMPFILE redhat/munin.spec.changelog
 rm -f $TMPFILE
 
 # Update the new version ...
-TMP_SPEC_FILE=$(mktemp)
+TMP_SPEC_FILE=$TMPDIR/munin.spec
 ( 
 	cat redhat/munin.spec |\
 		sed -e "s/^Version: .*/Version: $UPSTREAM/" |\
@@ -91,3 +97,6 @@ mkdir -p logs
 ) >> logs/rpm-buildpackage-$UPSTREAM.log 
 
 rm $TMP_SPEC_FILE
+
+# Remove temporary things
+rm -Rf rpmbuild/SOURCES rpmbuild/BUILD
